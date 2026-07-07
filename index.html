@@ -84,10 +84,10 @@ const sHit = () => beep(140,.25,'sawtooth',.08);
 const sStomp = () => beep(300,.1,'triangle',.09);
 const sWin = () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.18,'square'),i*140)); };
 
-// ---------- background music (original upbeat chiptune) ----------
-const LEAD = [659,0,784,0, 880,0,784,659, 523,0,659,0, 587,659,587,0,
-              659,0,784,0, 880,0,1047,880, 784,0,659,0, 587,0,523,0];
-const BASS = [131,0,131,0, 175,0,175,0, 196,0,196,0, 131,0,196,0];
+// ---------- background music (soft, deep original chiptune) ----------
+const LEAD = [330,0,392,0, 440,0,392,330, 262,0,330,0, 294,330,294,0,
+              330,0,392,0, 440,0,523,440, 392,0,330,0, 294,0,262,0];
+const BASS = [98,0,98,0, 131,0,131,0, 147,0,147,0, 98,0,147,0];
 let musTimer = null, musStep = 0;
 function startMusic() {
   if (musTimer) return;
@@ -96,10 +96,10 @@ function startMusic() {
   musTimer = setInterval(() => {
     const l = LEAD[musStep % LEAD.length];
     const b = BASS[musStep % BASS.length];
-    if (l) beep(l, .14, 'square', .022);
-    if (b) beep(b, .22, 'triangle', .035);
+    if (l) beep(l, .26, 'sine', .05);
+    if (b) beep(b, .34, 'triangle', .045);
     musStep++;
-  }, 150);
+  }, 185);
 }
 function stopMusic() { if (musTimer) { clearInterval(musTimer); musTimer = null; } }
 
@@ -419,14 +419,18 @@ function drawCastle() {
 function drawDecor() {
   // espresso machine + Ecem's Brew bag near start
   const x = 40-cam;
-  if (x>-160 && x<W) {
+  if (x>-320 && x<W) {
     px(x,GROUND-70,64,70,'#f2efe8'); px(x+6,GROUND-62,20,20,'#d8d4ca');
     px(x+38,GROUND-58,16,16,'#2a2a2a'); px(x+42,GROUND-54,8,8,'#e8e2d4');
     px(x+20,GROUND-36,10,16,'#8a8478'); px(x+22,GROUND-20,6,8,C.coffee);
     px(x+86,GROUND-56,44,56,'#a8703c'); px(x+86,GROUND-56,44,10,'#8a5a2e');
-    px(x+94,GROUND-40,28,22,'#e8dcc4');
-    ctx.fillStyle='#5a3218'; ctx.font='6px "Press Start 2P"'; ctx.textAlign='center';
-    ctx.fillText("ECEM'S", x+108, GROUND-31); ctx.fillText('BREW', x+108, GROUND-23);
+    // "ECEM'S GARDEN" sign: light panel on wooden posts
+    px(x+120,GROUND-70,6,70,'#8a5a2e'); px(x+236,GROUND-70,6,70,'#8a5a2e');
+    px(x+108,GROUND-122,146,56,'#f7f0dc');
+    px(x+108,GROUND-122,146,4,'#d8c6a8'); px(x+108,GROUND-70,146,4,'#8a5a2e');
+    px(x+108,GROUND-122,4,56,'#d8c6a8'); px(x+250,GROUND-122,4,56,'#8a5a2e');
+    ctx.fillStyle='#5a3218'; ctx.font='12px "Press Start 2P"'; ctx.textAlign='center';
+    ctx.fillText("ECEM'S", x+181, GROUND-99); ctx.fillText('GARDEN', x+181, GROUND-79);
     ctx.textAlign='left';
   }
   // checkpoint flag
@@ -573,7 +577,7 @@ function draw() {
   else if (state==='gameover') {
     centerPanel([
       {t:'GAME OVER', y:220, s:30, c:'#ff6a6a'},
-      {t:'Merto kapsulsuz kaldi...', y:280, s:12},
+      {t:'Merto prensesine ve kahvesine kavuşamadı...', y:280, s:11},
       {t:'ENTER: tekrar dene', y:340, s:12, c:C.gold}
     ]);
   }
