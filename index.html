@@ -84,6 +84,25 @@ const sHit = () => beep(140,.25,'sawtooth',.08);
 const sStomp = () => beep(300,.1,'triangle',.09);
 const sWin = () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.18,'square'),i*140)); };
 
+// ---------- background music (original upbeat chiptune) ----------
+const LEAD = [659,0,784,0, 880,0,784,659, 523,0,659,0, 587,659,587,0,
+              659,0,784,0, 880,0,1047,880, 784,0,659,0, 587,0,523,0];
+const BASS = [131,0,131,0, 175,0,175,0, 196,0,196,0, 131,0,196,0];
+let musTimer = null, musStep = 0;
+function startMusic() {
+  if (musTimer) return;
+  try { AC = AC || new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
+  musStep = 0;
+  musTimer = setInterval(() => {
+    const l = LEAD[musStep % LEAD.length];
+    const b = BASS[musStep % BASS.length];
+    if (l) beep(l, .14, 'square', .022);
+    if (b) beep(b, .22, 'triangle', .035);
+    musStep++;
+  }, 150);
+}
+function stopMusic() { if (musTimer) { clearInterval(musTimer); musTimer = null; } }
+
 // ---------- level ----------
 const grounds = [ [0,900],[980,1800],[1880,2900],[3000,3900],[4000,6000] ];
 const plats = [
@@ -112,10 +131,11 @@ const CASTLE_X = 5560;
 let state, player, coffees, enemies, cam, score, lives, coffeeCount, inv, respawnX, t, msgT, winT;
 const keys = {};
 
+const CAPCOLS = ['#8a4fd8','#e0483c','#ffc82e','#2ab6a0','#5a8f2e','#c05a9e','#4a6ee0','#a86a3c'];
 function reset(full) {
   if (full) { score = 0; lives = 3; }
   coffeeCount = 0;
-  coffees = coffeePts.map(p => ({x:p[0], y:p[1], got:false}));
+  coffees = coffeePts.map((p,i) => ({x:p[0], y:p[1], got:false, col:CAPCOLS[i%CAPCOLS.length]}));
   enemies = enemyDefs.map(e => ({x:e[0]+20, x0:e[0], x1:e[1], y:e[2], w:34, h:30, dir:1, dead:0}));
   player = {x:80, y:GROUND-48, vx:0, vy:0, w:30, h:46, onGround:false, face:1, frame:0, crouch:false};
   cam = 0; inv = 0; respawnX = 80; t = 0; msgT = 0;
@@ -127,12 +147,12 @@ startTitle();
 addEventListener('keydown', e => {
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys[e.key] = true;
-  if (state==='title' && (e.key==='Enter'||e.key===' ')) { state='play'; }
+  if (state==='title' && (e.key==='Enter'||e.key===' ')) { state='play'; startMusic(); }
   else if ((state==='win'||state==='gameover') && (e.key==='Enter'||e.key===' ')) { startTitle(); }
 });
 addEventListener('keyup', e => keys[e.key] = false);
 cvs.addEventListener('pointerdown', () => {
-  if (state==='title') state='play';
+  if (state==='title') { state='play'; startMusic(); }
   else if (state==='win'||state==='gameover') startTitle();
 });
 function bindBtn(id, key){
@@ -208,12 +228,12 @@ function update() {
 
   // cacti
   cacti.forEach(ca => {
-    if (rectHit({x:p.x,y:p.y,w:p.w,h:p.h},{x:ca[0]-12,y:ca[1]-40,w:24,h:40})) hurt(false);
+    if (rectHit({x:p.x,y:p.y,w:p.w,h:p.h},{x:ca[0]-11,y:ca[1]-50,w:22,h:50})) hurt(false);
   });
 
   // princess / castle
   if (p.x > CASTLE_X-60) {
-    if (coffeeCount>=32) { state='win'; winT=t; sWin(); score+=1000; }
+    if (coffeeCount>=32) { state='win'; winT=t; stopMusic(); sWin(); score+=1000; }
     else { p.x = CASTLE_X-60; p.vx=0; msgT=2; }
   }
 
@@ -223,7 +243,7 @@ function update() {
 function hurt(pit) {
   if (inv>0 && !pit) return;
   lives--; sHit();
-  if (lives<=0) { state='gameover'; return; }
+  if (lives<=0) { state='gameover'; stopMusic(); return; }
   player.x=respawnX; player.y=GROUND-48; player.vx=0; player.vy=0; inv=110;
 }
 
@@ -274,12 +294,13 @@ function drawCoffee(c) {
   // sparkle
   ctx.fillStyle='rgba(255,220,90,'+(.35+.25*Math.sin(t*.15+c.x))+')';
   ctx.beginPath(); ctx.arc(x,y,20,0,7); ctx.fill();
-  px(x-12,y-8,24,16,C.cup); px(x-12,y+4,24,4,C.cupShade);
-  px(x+12,y-5,6,8,C.cup); px(x+14,y-3,2,4,C.skyBot);
-  px(x-10,y-8,20,5,C.coffee);
-  // steam
-  const s = Math.sin(t*.1+c.x)*3;
-  px(x-3+s,y-18,4,6,C.steam); px(x+1-s,y-26,4,6,C.steam);
+  // capsule pod: dome + rim
+  px(x-13,y+6,26,5,c.col);                       // rim
+  px(x-15,y+8,30,3,'#3a2a1a');                   // rim edge
+  px(x-10,y-6,20,12,c.col);                      // dome
+  px(x-8,y-9,16,4,c.col);
+  px(x-6,y-6,4,8,'rgba(255,255,255,.55)');       // shine
+  px(x-3,y+1,10,3,'rgba(0,0,0,.18)');            // shade
 }
 function drawEnemy(en) {
   if (en.dead>0) return;
@@ -298,13 +319,23 @@ function drawEnemy(en) {
 }
 function drawCactus(ca) {
   const x=ca[0]-cam, y=ca[1];
-  if (x<-40||x>W+40) return;
-  px(x-7,y-40,14,40,C.cact);
-  px(x-21,y-30,10,6,C.cact); px(x-21,y-30,6,14,C.cact);
-  px(x+11,y-24,10,6,C.cact); px(x+15,y-32,6,14,C.cact);
-  px(x-4,y-36,3,3,'#173'); px(x+2,y-36,3,3,'#173');
-  px(x-3,y-30,7,2,'#173');
-  px(x-5,y-40,2,30,C.cactDark);
+  if (x<-50||x>W+50) return;
+  // chunky body
+  px(x-12,y-52,24,52,C.cact);
+  px(x-12,y-52,24,4,C.cactDark);
+  px(x-12,y-52,4,52,C.cactDark);
+  // chunky arms
+  px(x-28,y-38,16,10,C.cact); px(x-28,y-38,8,20,C.cact); px(x-28,y-40,8,4,C.cactDark);
+  px(x+12,y-30,16,10,C.cact); px(x+20,y-42,8,22,C.cact); px(x+20,y-44,8,4,C.cactDark);
+  // spikes (white ticks all around)
+  ctx.fillStyle='#eaf7dd';
+  for (let i=0;i<5;i++){ px(x-15,y-46+i*10,4,2,'#eaf7dd'); px(x+11,y-48+i*10,4,2,'#eaf7dd'); }
+  px(x-6,y-55,2,4,'#eaf7dd'); px(x+3,y-55,2,4,'#eaf7dd');
+  px(x-31,y-41,3,2,'#eaf7dd'); px(x-26,y-22,2,3,'#eaf7dd');
+  px(x+27,y-45,3,2,'#eaf7dd'); px(x+24,y-22,2,3,'#eaf7dd');
+  // grumpy face
+  px(x-6,y-44,4,4,'#173'); px(x+3,y-44,4,4,'#173');
+  px(x-4,y-36,9,3,'#173');
 }
 function drawMerto() {
   const p=player;
@@ -327,6 +358,23 @@ function drawMerto() {
   px(x+2, y-4+cr, 26, 8, C.cap);
   px(x+(f>0?16:-6), y+2+cr, 20, 4, C.cap);              // brim
   px(x+12, y-4+cr, 6, 3, '#ffffff');                    // cap mark
+}
+function drawMachine(x, baseY) {
+  // capsule coffee machine (pixel style), baseY = floor line
+  px(x+4,baseY-48,30,48,'#2a2a2e');               // body
+  px(x+4,baseY-48,30,5,'#4a4a52');
+  px(x,baseY-52,38,8,'#c0392b');                  // top head
+  px(x+30,baseY-58,12,10,'#c0392b');              // lever
+  px(x+34,baseY-64,4,8,'#8a8478');
+  px(x+12,baseY-40,14,10,'#1a1a1e');              // capsule slot
+  px(x+15,baseY-38,8,5,'#8a4fd8');                // capsule inside
+  px(x+14,baseY-26,10,6,'#4a4a52');               // spout
+  px(x+17,baseY-20,4,8,'#5a3218');                // pouring coffee
+  px(x+10,baseY-12,18,10,C.cup);                  // cup on tray
+  px(x+28,baseY-10,5,6,C.cup);
+  px(x+6,baseY-2,28,2,'#8a8478');                 // tray
+  const s=Math.sin(t*.12+x)*2;
+  px(x+16+s,baseY-34-18,3,5,C.steam);             // steam above
 }
 function drawCastle() {
   const x = CASTLE_X-cam; if (x<-400||x>W+100) return;
@@ -352,6 +400,8 @@ function drawCastle() {
   px(pxx+9,pyy+5,3,3,'#2a1a0c'); px(pxx+18,pyy+5,3,3,'#2a1a0c');
   px(pxx+12,pyy+11,6,2,'#c14a6a');
   px(pxx+8,pyy-10,14,7,C.crown); px(pxx+8,pyy-14,4,5,C.crown); px(pxx+13,pyy-14,4,5,C.crown); px(pxx+18,pyy-14,4,5,C.crown);
+  // capsule coffee machine next to princess
+  drawMachine(x+176, 360, 1);
   // heart bubble
   const bx=pxx-52, by=pyy-86 + Math.sin(t*.05)*4;
   ctx.fillStyle='#ffd9ec';
@@ -362,7 +412,7 @@ function drawCastle() {
   if (msgT>0 && coffeeCount<32) {
     ctx.fillStyle='#ffffff'; ctx.fillRect(x-10,240,250,34);
     ctx.fillStyle='#7a4a22'; ctx.font='9px "Press Start 2P"';
-    ctx.fillText('32 KAHVE LAZIM! ('+coffeeCount+'/32)', x+115, 262);
+    ctx.fillText('32 KAPSUL LAZIM! ('+coffeeCount+'/32)', x+115, 262);
   }
   ctx.textAlign='left';
 }
@@ -403,15 +453,80 @@ function outlineText(txt,x,y,size,col,align) {
 function drawHUD() {
   outlineText('LEVEL 1-1', 28, 40, 14, C.text);
   outlineText('SCORE: '+String(score).padStart(6,'0'), W/2, 40, 14, C.text, 'center');
-  outlineText('LIVES: '+lives+'x', W-150, 40, 14, C.text);
-  heart(W-42, 32, 11);
-  // coffee counter
-  px(20,58,26,18,C.cup); px(20,72,26,4,C.cupShade); px(46,62,7,9,C.cup); px(22,58,22,6,C.coffee);
+  outlineText('LIVES:', W-190, 40, 14, C.text);
+  for (let i=0;i<lives;i++) heart(W-80+i*30, 32, 11);
+  // capsule counter
+  px(20,66,26,5,'#8a4fd8'); px(18,68,30,3,'#3a2a1a');
+  px(23,55,20,12,'#8a4fd8'); px(25,52,16,4,'#8a4fd8'); px(27,55,4,8,'rgba(255,255,255,.55)');
   outlineText(coffeeCount+'/32', 60, 76, 13, C.gold);
 }
 function centerPanel(lines) {
   ctx.fillStyle='rgba(6,26,42,.82)'; ctx.fillRect(0,0,W,H);
   lines.forEach(l=> outlineText(l.t, W/2, l.y, l.s, l.c||C.text, 'center'));
+}
+function drawMiniMerto(x, holdCup) {
+  px(x+2,-6,12,6,C.shoe); px(x+16,-6,12,6,C.shoe);
+  px(x+4,-16,9,10,C.pants); px(x+17,-16,9,10,C.pants);
+  px(x+2,-30,26,14,C.vest);
+  if (holdCup) {
+    px(x+24,-28,12,5,C.shirt);
+    px(x+36,-33,11,8,C.cup); px(x+37,-33,9,3,C.coffee);
+    px(x+40+Math.sin(t*.12)*2,-42,3,5,C.steam);
+  } else {
+    px(x+24,-32,14,5,C.shirt);            // arm hugging
+  }
+  px(x+4,-46,22,16,C.skin);
+  px(x+18,-42,4,4,'#2a1a0c');
+  px(x+10,-36,16,4,C.mus);
+  px(x+2,-50,26,8,C.cap); px(x+18,-44,12,4,C.cap);
+}
+function drawMiniEcem(x, holdCup) {
+  px(x-2,-24,32,24,C.pink); px(x,-6,28,4,C.pinkD);
+  px(x+6,-34,18,12,C.pink);
+  if (holdCup) {
+    px(x+22,-31,10,5,C.skin);
+    px(x+32,-36,11,8,C.cup); px(x+33,-36,9,3,C.coffee);
+    px(x+36-Math.sin(t*.12)*2,-45,3,5,C.steam);
+  } else {
+    px(x-8,-33,12,5,C.skin);              // arm hugging
+  }
+  px(x+6,-48,18,14,C.skin);
+  px(x+2,-50,6,20,C.hair); px(x+22,-50,6,20,C.hair); px(x+6,-52,18,5,C.hair);
+  px(x+9,-44,3,3,'#2a1a0c'); px(x+17,-44,3,3,'#2a1a0c');
+  px(x+11,-38,7,2,'#c14a6a');
+  px(x+9,-59,12,6,C.crown); px(x+9,-63,3,4,C.crown); px(x+14,-63,3,4,C.crown); px(x+18,-63,3,4,C.crown);
+}
+function drawWinScene() {
+  const ph = t - winT, hugging = ph < 170;
+  ctx.fillStyle='rgba(6,26,42,.6)'; ctx.fillRect(0,0,W,H);
+  // little stage
+  px(W/2-230,402,460,12,C.grassLight); px(W/2-230,414,460,30,C.dirt);
+  ctx.save(); ctx.translate(W/2,402); ctx.scale(2,2);
+  if (hugging) {
+    drawMiniMerto(-52,false);
+    drawMiniEcem(-18,false);
+    heart(-19, -70 - Math.sin(t*.15)*3, 9 + Math.sin(t*.2)*2);   // big pulsing heart
+  } else {
+    drawMiniMerto(-92,true);
+    drawMiniEcem(-30,true);
+    drawMachine(28,0);
+    heart(-52,-70+Math.sin(t*.1)*4,5); heart(-2,-78+Math.cos(t*.1)*4,4);
+  }
+  ctx.restore();
+  outlineText('PRENSES ECEM KURTARILDI!', W/2, 90, 20, '#ff8ac2', 'center');
+  if (hugging) {
+    outlineText('Merto ve Ecem kavustu!', W/2, 140, 12, C.text, 'center');
+  } else {
+    outlineText('Simdi birlikte kahve keyfi ☕', W/2, 140, 12, C.text, 'center');
+    outlineText('HAPPY BIRTHDAY MERTO!', W/2, 490, 18, C.gold, 'center');
+    outlineText('Seni seviyorum! - Ecem      SCORE: '+score, W/2, 520, 10, C.text, 'center');
+    if (Math.floor(t/30)%2) outlineText('ENTER: yeniden oyna', W-160, 30, 8, C.text, 'center');
+    for(let i=0;i<10;i++){
+      const hx=(W/10)*i + Math.sin(t*.05+i)*20;
+      const hy=(t*2+i*80)%(H+60)-30;
+      heart(hx+40,hy,6+(i%3)*3);
+    }
+  }
 }
 function drawTitleHero() {
   // rainbow title like the reference
@@ -445,31 +560,20 @@ function draw() {
     ctx.fillStyle='rgba(6,26,42,.55)'; ctx.fillRect(0,0,W,H);
     drawTitleHero();
     outlineText('Prenses Ecem kalede bekliyor!', W/2, 270, 11, C.text, 'center');
-    outlineText('32 kahveyi topla ve onu kurtar (32 yaş!)', W/2, 296, 11, C.text, 'center');
-    px(W/2-160,330,320,90,'rgba(255,255,255,.12)');
-    outlineText('◀ ▶  yürü      ▲  zıpla', W/2, 362, 11, C.text, 'center');
-    outlineText('▼ eğil   canavarların üstüne bas!', W/2, 392, 11, C.text, 'center');
+    outlineText('32 kahve kapsulunu topla ve onu kurtar!', W/2, 296, 11, C.text, 'center');
+    outlineText('ve birlikte kahve makinenizden kahve icin ☕', W/2, 320, 11, '#ffd9ec', 'center');
+    px(W/2-160,342,320,86,'rgba(255,255,255,.12)');
+    outlineText('◀ ▶  yürü      ▲  zıpla', W/2, 374, 11, C.text, 'center');
+    outlineText('▼ eğil   canavarların üstüne bas!', W/2, 404, 11, C.text, 'center');
     if (Math.floor(t/30)%2) outlineText('BAŞLAMAK İÇİN ENTER / DOKUN', W/2, 470, 12, C.gold, 'center');
   }
   else if (state==='win') {
-    centerPanel([
-      {t:'PRENSES ECEM KURTARILDI!', y:170, s:20, c:'#ff8ac2'},
-      {t:'SCORE: '+score, y:230, s:14},
-      {t:'❤', y:290, s:30, c:C.heart},
-      {t:'HAPPY BIRTHDAY MERTO!', y:350, s:18, c:C.gold},
-      {t:'Seni seviyorum! - Ecem', y:392, s:11},
-      {t:'ENTER: yeniden oyna', y:470, s:10}
-    ]);
-    for(let i=0;i<10;i++){
-      const hx=(W/10)*i + Math.sin(t*.05+i)*20;
-      const hy=(t*2+i*80)%(H+60)-30;
-      heart(hx+40,hy,7+(i%3)*3);
-    }
+    drawWinScene();
   }
   else if (state==='gameover') {
     centerPanel([
       {t:'GAME OVER', y:220, s:30, c:'#ff6a6a'},
-      {t:'Merto kahvesiz kaldı...', y:280, s:12},
+      {t:'Merto kapsulsuz kaldi...', y:280, s:12},
       {t:'ENTER: tekrar dene', y:340, s:12, c:C.gold}
     ]);
   }
