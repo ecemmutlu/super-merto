@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPER MERTO: The Coffee Rush</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#15120f;
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  font-family:'Press Start 2P', monospace; overflow:hidden;
+}
+.tv {
+  background:#1c1a17; padding:26px 30px 34px;
+  border-radius:38px; box-shadow: inset 0 2px 0 #3a352e, 0 24px 60px rgba(0,0,0,.7);
+  position:relative; max-width:100vw;
+}
+.tv::after { /* power light */
+  content:''; position:absolute; right:44px; bottom:12px; width:10px; height:10px;
+  border-radius:50%; background:#ffb52e; box-shadow:0 0 10px #ffb52e;
+}
+.screen { position:relative; border-radius:18px; overflow:hidden; box-shadow:0 0 40px rgba(120,200,255,.18); }
+canvas { display:block; image-rendering:pixelated; width:min(92vw,960px); height:auto; }
+.scanlines { pointer-events:none; position:absolute; inset:0;
+  background:repeating-linear-gradient(0deg, rgba(0,0,0,.12) 0 2px, transparent 2px 4px);
+  mix-blend-mode:multiply; }
+.touch { display:none; position:fixed; inset:auto 0 12px 0; justify-content:space-between; padding:0 16px; z-index:5; }
+.touch button { font-family:inherit; font-size:20px; width:64px; height:64px; border-radius:16px;
+  border:3px solid #3a352e; background:#26221d; color:#f5e9d0; opacity:.85; }
+.touch .grp { display:flex; gap:10px; }
+@media (pointer:coarse) { .touch { display:flex; } body { padding-bottom:90px; } }
+</style>
+</head>
+<body>
+<div class="tv">
+  <div class="screen">
+    <canvas id="game" width="960" height="540"></canvas>
+    <div class="scanlines"></div>
+  </div>
+</div>
+<div class="touch">
+  <div class="grp"><button id="btnL">◀</button><button id="btnR">▶</button></div>
+  <div class="grp"><button id="btnJ">▲</button></div>
+</div>
+<script>
+"use strict";
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const W = cvs.width, H = cvs.height;
+const WORLD = 6000, GROUND = 480;
+
+// ---------- palette ----------
+const C = {
+  skyTop:'#3fbcf2', skyBot:'#8fdcf7', cloud:'#ffffff', city:'#6fc7ee',
+  grass:'#3fae2a', grassLight:'#5ccf3f', dirt:'#8a5a33', dirtDark:'#6e4525',
+  cup:'#efe3cf', cupShade:'#d8c6a8', coffee:'#5a3218', steam:'#e8f4fb',
+  cap:'#1f56c9', skin:'#f2b98c', mus:'#5a3a1e', shirt:'#f6f2ea',
+  vest:'#7a4a22', pants:'#2a63c4', shoe:'#5a3218',
+  cact:'#3f9e3f', cactDark:'#2f7a2f',
+  pink:'#f27ab8', pinkD:'#d95a9c', hair:'#8a5a33', crown:'#ffc82e',
+  brick:'#b9b2a4', brickD:'#948d7f', heart:'#e8283c',
+  text:'#ffffff', shadow:'#0b3550', gold:'#ffc82e'
+};
+
+// ---------- audio ----------
+let AC = null;
+function beep(f, d, type, vol) {
+  try {
+    AC = AC || new (window.AudioContext||window.webkitAudioContext)();
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type||'square'; o.frequency.value = f;
+    g.gain.setValueAtTime(vol||0.06, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + d);
+    o.connect(g); g.connect(AC.destination);
+    o.start(); o.stop(AC.currentTime + d);
+  } catch(e) {}
+}
+const sJump = () => beep(520,.12,'square');
+const sCoffee = () => { beep(880,.07,'square'); setTimeout(()=>beep(1320,.09,'square'),60); };
+const sHit = () => beep(140,.25,'sawtooth',.08);
+const sStomp = () => beep(300,.1,'triangle',.09);
+const sWin = () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.18,'square'),i*140)); };
+
+// ---------- level ----------
+const grounds = [ [0,900],[980,1800],[1880,2900],[3000,3900],[4000,6000] ];
+const plats = [
+  [300,380,140],[520,300,120],[760,360,140],
+  [1050,380,160],[1250,300,120],[1500,360,150],
+  [1950,380,150],[2150,300,130],[2400,360,150],[2650,280,120],
+  [3100,380,160],[3350,300,140],[3650,360,150],
+  [4100,380,160],[4350,300,140],[4600,360,150],[4850,280,120]
+];
+const coffeePts = [
+  [200,430],[360,330],[480,430],[575,250],[825,310],[870,430],
+  [1110,330],[1305,250],[1420,430],[1570,310],[1700,430],
+  [1900,430],[2020,330],[2210,250],[2300,430],[2470,310],[2600,430],[2705,230],[2820,430],
+  [3050,430],[3175,330],[3300,430],[3415,250],[3720,310],[3850,430],
+  [4175,330],[4300,430],[4415,250],[4670,310],[4750,430],[4905,230],[5250,430]
+];
+const cacti = [ [700,GROUND],[1650,GROUND],[2550,GROUND],[3500,GROUND],[4550,GROUND],[5100,GROUND] ];
+const enemyDefs = [
+  [430,830,GROUND],[1100,1700,GROUND],[2000,2800,GROUND],
+  [3100,3800,GROUND],[4100,4700,GROUND],[4900,5300,GROUND],
+  [1055,1200,380],[2405,2540,360],[4105,4250,380]
+];
+const CASTLE_X = 5560;
+
+// ---------- state ----------
+let state, player, coffees, enemies, cam, score, lives, coffeeCount, inv, respawnX, t, msgT, winT;
+const keys = {};
+
+function reset(full) {
+  if (full) { score = 0; lives = 3; }
+  coffeeCount = 0;
+  coffees = coffeePts.map(p => ({x:p[0], y:p[1], got:false}));
+  enemies = enemyDefs.map(e => ({x:e[0]+20, x0:e[0], x1:e[1], y:e[2], w:34, h:30, dir:1, dead:0}));
+  player = {x:80, y:GROUND-48, vx:0, vy:0, w:30, h:46, onGround:false, face:1, frame:0, crouch:false};
+  cam = 0; inv = 0; respawnX = 80; t = 0; msgT = 0;
+}
+function startTitle(){ state='title'; reset(true); }
+startTitle();
+
+// ---------- input ----------
+addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+  if (state==='title' && (e.key==='Enter'||e.key===' ')) { state='play'; }
+  else if ((state==='win'||state==='gameover') && (e.key==='Enter'||e.key===' ')) { startTitle(); }
+});
+addEventListener('keyup', e => keys[e.key] = false);
+cvs.addEventListener('pointerdown', () => {
+  if (state==='title') state='play';
+  else if (state==='win'||state==='gameover') startTitle();
+});
+function bindBtn(id, key){
+  const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e=>{e.preventDefault(); keys[key]=true;});
+  b.addEventListener('pointerup', ()=>keys[key]=false);
+  b.addEventListener('pointerleave', ()=>keys[key]=false);
+}
+bindBtn('btnL','ArrowLeft'); bindBtn('btnR','ArrowRight'); bindBtn('btnJ','ArrowUp');
+
+// ---------- physics helpers ----------
+function groundAt(x) { return grounds.some(g => x>=g[0] && x<=g[1]); }
+function landSurfaces(px, pw) {
+  const s = [];
+  grounds.forEach(g => { if (px+pw>g[0] && px<g[1]) s.push({y:GROUND, x0:g[0], x1:g[1]}); });
+  plats.forEach(p => { if (px+pw>p[0] && px<p[0]+p[2]) s.push({y:p[1], x0:p[0], x1:p[0]+p[2]}); });
+  return s;
+}
+function rectHit(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+
+// ---------- update ----------
+function update() {
+  t++;
+  if (state!=='play') return;
+  const p = player;
+  const acc=.7, max=4.2, fric=.8;
+  if (keys['ArrowLeft']||keys['a']) { p.vx=Math.max(p.vx-acc,-max); p.face=-1; }
+  else if (keys['ArrowRight']||keys['d']) { p.vx=Math.min(p.vx+acc,max); p.face=1; }
+  else p.vx*=fric;
+  p.crouch = (keys['ArrowDown']||keys['s']) && p.onGround;
+  if ((keys['ArrowUp']||keys['w']||keys[' ']) && p.onGround) { p.vy=-12.5; p.onGround=false; sJump(); }
+  if (!(keys['ArrowUp']||keys['w']||keys[' ']) && p.vy<-4) p.vy=-4;   // jump cut
+  p.vy += (keys['ArrowDown'] && !p.onGround) ? 1.1 : .55;             // down = fast fall
+  if (p.vy>14) p.vy=14;
+
+  p.x += p.vx;
+  p.x = Math.max(0, Math.min(WORLD-40, p.x));
+  const prevBottom = p.y+p.h;
+  p.y += p.vy;
+  p.onGround = false;
+  landSurfaces(p.x,p.w).forEach(s => {
+    if (p.vy>=0 && prevBottom<=s.y+6 && p.y+p.h>=s.y) { p.y=s.y-p.h; p.vy=0; p.onGround=true; }
+  });
+  if (Math.abs(p.vx)>.5 && p.onGround) p.frame=(p.frame+.2)%2; else p.frame=0;
+
+  // fall in pit
+  if (p.y > H+60) hurt(true);
+
+  // checkpoint
+  if (p.x>2950 && respawnX<2950) { respawnX=2960; msgT=90; }
+
+  if (inv>0) inv--;
+
+  // coffees
+  coffees.forEach(c => {
+    if (!c.got && rectHit({x:p.x,y:p.y,w:p.w,h:p.h},{x:c.x-14,y:c.y-14,w:28,h:28})) {
+      c.got=true; coffeeCount++; score+=200; sCoffee();
+    }
+  });
+
+  // enemies
+  enemies.forEach(en => {
+    if (en.dead>0) { en.dead--; return; }
+    en.x += en.dir*1.3;
+    if (en.x<en.x0) { en.x=en.x0; en.dir=1; }
+    if (en.x>en.x1-en.w) { en.x=en.x1-en.w; en.dir=-1; }
+    const eb = {x:en.x, y:en.y-en.h, w:en.w, h:en.h};
+    if (rectHit({x:p.x,y:p.y,w:p.w,h:p.h}, eb)) {
+      if (p.vy>2 && p.y+p.h < eb.y+18) { en.dead=9999; p.vy=-9; score+=100; sStomp(); }
+      else hurt(false);
+    }
+  });
+
+  // cacti
+  cacti.forEach(ca => {
+    if (rectHit({x:p.x,y:p.y,w:p.w,h:p.h},{x:ca[0]-12,y:ca[1]-40,w:24,h:40})) hurt(false);
+  });
+
+  // princess / castle
+  if (p.x > CASTLE_X-60) {
+    if (coffeeCount>=32) { state='win'; winT=t; sWin(); score+=1000; }
+    else { p.x = CASTLE_X-60; p.vx=0; msgT=2; }
+  }
+
+  cam = Math.max(0, Math.min(WORLD-W, p.x - W*0.38));
+  if (msgT>0) msgT--;
+}
+function hurt(pit) {
+  if (inv>0 && !pit) return;
+  lives--; sHit();
+  if (lives<=0) { state='gameover'; return; }
+  player.x=respawnX; player.y=GROUND-48; player.vx=0; player.vy=0; inv=110;
+}
+
+// ---------- drawing ----------
+function px(x,y,w,h,col){ ctx.fillStyle=col; ctx.fillRect(Math.round(x),Math.round(y),w,h); }
+
+function drawSky() {
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,C.skyTop); g.addColorStop(1,C.skyBot);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // city silhouette (parallax)
+  ctx.fillStyle=C.city;
+  const off = -(cam*.25)%400;
+  for (let i=-1;i<4;i++){
+    const bx=off+i*400;
+    px(bx+20,300,70,180,C.city); px(bx+110,340,50,140,C.city);
+    px(bx+180,270,60,210,C.city); px(bx+260,330,80,150,C.city);
+    px(bx+200,250,20,20,C.city);
+  }
+  // clouds
+  const co=-(cam*.4)%700;
+  for(let i=-1;i<3;i++) drawCloud(co+i*700+80,80), drawCloud(co+i*700+420,140);
+}
+function drawCloud(x,y){
+  px(x,y,90,26,C.cloud); px(x+16,y-14,58,16,C.cloud); px(x-14,y+8,20,14,C.cloud); px(x+86,y+8,20,14,C.cloud);
+}
+function drawGround() {
+  grounds.forEach(g => {
+    const x=g[0]-cam, w=g[1]-g[0];
+    if (x>W||x+w<0) return;
+    px(x,GROUND,w,10,C.grassLight);
+    px(x,GROUND+10,w,8,C.grass);
+    px(x,GROUND+18,w,H-GROUND-18,C.dirt);
+    for(let i=0;i<w;i+=26) px(x+i,GROUND+26,14,10,C.dirtDark);
+  });
+}
+function drawPlat(p) {
+  const x=p[0]-cam; if (x>W||x+p[2]<0) return;
+  px(x,p[1],p[2],8,C.grassLight);
+  px(x,p[1]+8,p[2],8,C.grass);
+  px(x,p[1]+16,p[2],14,C.dirt);
+  for(let i=4;i<p[2]-10;i+=24) px(x+i,p[1]+18,12,8,C.dirtDark);
+}
+function drawCoffee(c) {
+  if (c.got) return;
+  const x=c.x-cam, y=c.y + Math.sin((t+c.x)*.06)*3;
+  if (x<-40||x>W+40) return;
+  // sparkle
+  ctx.fillStyle='rgba(255,220,90,'+(.35+.25*Math.sin(t*.15+c.x))+')';
+  ctx.beginPath(); ctx.arc(x,y,20,0,7); ctx.fill();
+  px(x-12,y-8,24,16,C.cup); px(x-12,y+4,24,4,C.cupShade);
+  px(x+12,y-5,6,8,C.cup); px(x+14,y-3,2,4,C.skyBot);
+  px(x-10,y-8,20,5,C.coffee);
+  // steam
+  const s = Math.sin(t*.1+c.x)*3;
+  px(x-3+s,y-18,4,6,C.steam); px(x+1-s,y-26,4,6,C.steam);
+}
+function drawEnemy(en) {
+  if (en.dead>0) return;
+  const x=en.x-cam, y=en.y-en.h;
+  if (x<-60||x>W+60) return;
+  const wob = Math.sin(t*.2+en.x)*2;
+  px(x,y+4+wob,en.w,en.h-4,C.cup);
+  px(x,y+en.h-6+wob,en.w,4,C.cupShade);
+  px(x-2,y+wob,en.w+4,8,C.coffee);              // spilled top
+  px(x+6,y+en.h-2,6,4,C.coffee); px(x+22,y+en.h-2,8,4,C.coffee); // drips
+  px(x+(en.dir>0?en.w:-8),y+10+wob,8,6,C.cup);  // handle
+  // angry face
+  px(x+7,y+12+wob,5,5,'#2a1a0c'); px(x+21,y+12+wob,5,5,'#2a1a0c');
+  px(x+5,y+9+wob,8,3,C.coffee); px(x+20,y+9+wob,8,3,C.coffee);
+  px(x+10,y+22+wob,13,3,'#2a1a0c');
+}
+function drawCactus(ca) {
+  const x=ca[0]-cam, y=ca[1];
+  if (x<-40||x>W+40) return;
+  px(x-7,y-40,14,40,C.cact);
+  px(x-21,y-30,10,6,C.cact); px(x-21,y-30,6,14,C.cact);
+  px(x+11,y-24,10,6,C.cact); px(x+15,y-32,6,14,C.cact);
+  px(x-4,y-36,3,3,'#173'); px(x+2,y-36,3,3,'#173');
+  px(x-3,y-30,7,2,'#173');
+  px(x-5,y-40,2,30,C.cactDark);
+}
+function drawMerto() {
+  const p=player;
+  if (inv>0 && Math.floor(t/4)%2) return;   // blink
+  const x=p.x-cam, y=p.y, f=p.face;
+  const leg = p.onGround && Math.abs(p.vx)>.5 ? Math.floor(p.frame)*4 : 0;
+  const cr = p.crouch ? 8 : 0;
+  // shoes + pants
+  px(x+2, y+40, 12, 6, C.shoe); px(x+16+leg, y+40, 12, 6, C.shoe);
+  px(x+4, y+30+cr, 9, 12-cr, C.pants); px(x+17, y+30+cr, 9, 12-cr, C.pants);
+  // vest + shirt arms
+  px(x+2, y+16+cr, 26, 16-cr, C.vest);
+  px(x+(f>0?-3:23), y+18+cr, 10, 8, C.shirt);
+  px(x+8, y+16+cr, 14, 5, C.shirt);
+  // head
+  px(x+4, y+cr, 22, 18, C.skin);
+  px(x+(f>0?18:6), y+6+cr, 5, 4, '#2a1a0c');           // eye
+  px(x+(f>0?10:4), y+12+cr, 16, 4, C.mus);              // mustache
+  // cap
+  px(x+2, y-4+cr, 26, 8, C.cap);
+  px(x+(f>0?16:-6), y+2+cr, 20, 4, C.cap);              // brim
+  px(x+12, y-4+cr, 6, 3, '#ffffff');                    // cap mark
+}
+function drawCastle() {
+  const x = CASTLE_X-cam; if (x<-400||x>W+100) return;
+  // towers
+  [-30,230].forEach(dx=>{
+    px(x+dx,300,70,180,C.brick);
+    px(x+dx,300,70,10,C.brickD);
+    for(let i=0;i<70;i+=18) px(x+dx+i,290,10,12,C.brick);
+    px(x+dx+24,330,20,26,'#1c2f4a');
+  });
+  // wall
+  px(x+40,360,190,120,C.brick);
+  for(let i=0;i<190;i+=20) px(x+40+i,352,12,10,C.brick);
+  for(let r=0;r<5;r++)for(let i=0;i<190;i+=28) px(x+42+i+(r%2?12:0),368+r*22,22,3,C.brickD);
+  px(x+112,410,46,70,'#3a2412');
+  // princess Ecem
+  const pxx=x+118, pyy=308, wave=Math.sin(t*.1)*3;
+  px(pxx+2,pyy+30,26,24,C.pink); px(pxx+5,pyy+50,20,6,C.pinkD);
+  px(pxx+4,pyy+18,22,14,C.pink);
+  px(pxx-4,pyy+16+wave,8,6,C.skin);                       // waving hand
+  px(pxx+5,pyy,20,16,C.skin);
+  px(pxx+1,pyy-2,7,22,C.hair); px(pxx+22,pyy-2,7,22,C.hair); px(pxx+5,pyy-4,20,5,C.hair);
+  px(pxx+9,pyy+5,3,3,'#2a1a0c'); px(pxx+18,pyy+5,3,3,'#2a1a0c');
+  px(pxx+12,pyy+11,6,2,'#c14a6a');
+  px(pxx+8,pyy-10,14,7,C.crown); px(pxx+8,pyy-14,4,5,C.crown); px(pxx+13,pyy-14,4,5,C.crown); px(pxx+18,pyy-14,4,5,C.crown);
+  // heart bubble
+  const bx=pxx-52, by=pyy-86 + Math.sin(t*.05)*4;
+  ctx.fillStyle='#ffd9ec';
+  ctx.beginPath(); ctx.arc(bx+30,by+28,42,0,7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(bx+44,by+62); ctx.lineTo(bx+58,by+82); ctx.lineTo(bx+62,by+58); ctx.fill();
+  ctx.fillStyle='#e8286e'; ctx.font='10px "Press Start 2P"'; ctx.textAlign='center';
+  ctx.fillText('SAVE', bx+30, by+22); ctx.fillText('ECEM!', bx+30, by+40);
+  if (msgT>0 && coffeeCount<32) {
+    ctx.fillStyle='#ffffff'; ctx.fillRect(x-10,240,250,34);
+    ctx.fillStyle='#7a4a22'; ctx.font='9px "Press Start 2P"';
+    ctx.fillText('32 KAHVE LAZIM! ('+coffeeCount+'/32)', x+115, 262);
+  }
+  ctx.textAlign='left';
+}
+function drawDecor() {
+  // espresso machine + Ecem's Brew bag near start
+  const x = 40-cam;
+  if (x>-160 && x<W) {
+    px(x,GROUND-70,64,70,'#f2efe8'); px(x+6,GROUND-62,20,20,'#d8d4ca');
+    px(x+38,GROUND-58,16,16,'#2a2a2a'); px(x+42,GROUND-54,8,8,'#e8e2d4');
+    px(x+20,GROUND-36,10,16,'#8a8478'); px(x+22,GROUND-20,6,8,C.coffee);
+    px(x+86,GROUND-56,44,56,'#a8703c'); px(x+86,GROUND-56,44,10,'#8a5a2e');
+    px(x+94,GROUND-40,28,22,'#e8dcc4');
+    ctx.fillStyle='#5a3218'; ctx.font='6px "Press Start 2P"'; ctx.textAlign='center';
+    ctx.fillText("ECEM'S", x+108, GROUND-31); ctx.fillText('BREW', x+108, GROUND-23);
+    ctx.textAlign='left';
+  }
+  // checkpoint flag
+  const fx=2960-cam;
+  if (fx>-40 && fx<W) {
+    px(fx,GROUND-70,4,70,'#8a8478');
+    px(fx+4,GROUND-70,26,16,respawnX>2950?C.gold:'#cccccc');
+  }
+}
+function heart(x,y,s) {
+  ctx.fillStyle=C.heart;
+  ctx.beginPath();
+  ctx.arc(x-s*.5,y,s*.55,0,7); ctx.arc(x+s*.5,y,s*.55,0,7);
+  ctx.moveTo(x-s,y+s*.15); ctx.lineTo(x,y+s*1.3); ctx.lineTo(x+s,y+s*.15);
+  ctx.fill();
+}
+function outlineText(txt,x,y,size,col,align) {
+  ctx.font=size+'px "Press Start 2P"'; ctx.textAlign=align||'left';
+  ctx.fillStyle=C.shadow;
+  ctx.fillText(txt,x+3,y+3);
+  ctx.fillStyle=col; ctx.fillText(txt,x,y);
+  ctx.textAlign='left';
+}
+function drawHUD() {
+  outlineText('LEVEL 1-1', 28, 40, 14, C.text);
+  outlineText('SCORE: '+String(score).padStart(6,'0'), W/2, 40, 14, C.text, 'center');
+  outlineText('LIVES: '+lives+'x', W-150, 40, 14, C.text);
+  heart(W-42, 32, 11);
+  // coffee counter
+  px(20,58,26,18,C.cup); px(20,72,26,4,C.cupShade); px(46,62,7,9,C.cup); px(22,58,22,6,C.coffee);
+  outlineText(coffeeCount+'/32', 60, 76, 13, C.gold);
+}
+function centerPanel(lines) {
+  ctx.fillStyle='rgba(6,26,42,.82)'; ctx.fillRect(0,0,W,H);
+  lines.forEach(l=> outlineText(l.t, W/2, l.y, l.s, l.c||C.text, 'center'));
+}
+function drawTitleHero() {
+  // rainbow title like the reference
+  const title='SUPER MERTO';
+  const cols=['#ff5a5a','#ff9a3c','#ffd23c','#6ee06e','#5ab8ff','#b88aff'];
+  ctx.font='34px "Press Start 2P"'; ctx.textAlign='center';
+  const tw = ctx.measureText(title).width; let cx = W/2 - tw/2;
+  for (const ch of title) {
+    const w = ctx.measureText(ch).width;
+    ctx.fillStyle=C.shadow; ctx.fillText(ch,cx+w/2+4,144);
+    ctx.fillStyle=cols[Math.floor((cx/40))%cols.length]; ctx.fillText(ch,cx+w/2,140);
+    cx+=w;
+  }
+  outlineText('THE COFFEE RUSH', W/2, 190, 20, C.gold, 'center');
+  ctx.textAlign='left';
+}
+
+function draw() {
+  drawSky();
+  drawGround();
+  plats.forEach(drawPlat);
+  drawDecor();
+  cacti.forEach(drawCactus);
+  coffees.forEach(drawCoffee);
+  enemies.forEach(drawEnemy);
+  drawCastle();
+  drawMerto();
+  drawHUD();
+
+  if (state==='title') {
+    ctx.fillStyle='rgba(6,26,42,.55)'; ctx.fillRect(0,0,W,H);
+    drawTitleHero();
+    outlineText('Prenses Ecem kalede bekliyor!', W/2, 270, 11, C.text, 'center');
+    outlineText('32 kahveyi topla ve onu kurtar (32 yaş!)', W/2, 296, 11, C.text, 'center');
+    px(W/2-160,330,320,90,'rgba(255,255,255,.12)');
+    outlineText('◀ ▶  yürü      ▲  zıpla', W/2, 362, 11, C.text, 'center');
+    outlineText('▼ eğil   canavarların üstüne bas!', W/2, 392, 11, C.text, 'center');
+    if (Math.floor(t/30)%2) outlineText('BAŞLAMAK İÇİN ENTER / DOKUN', W/2, 470, 12, C.gold, 'center');
+  }
+  else if (state==='win') {
+    centerPanel([
+      {t:'PRENSES ECEM KURTARILDI!', y:170, s:20, c:'#ff8ac2'},
+      {t:'SCORE: '+score, y:230, s:14},
+      {t:'❤', y:290, s:30, c:C.heart},
+      {t:'HAPPY BIRTHDAY MERTO!', y:350, s:18, c:C.gold},
+      {t:'Seni seviyorum! - Ecem', y:392, s:11},
+      {t:'ENTER: yeniden oyna', y:470, s:10}
+    ]);
+    for(let i=0;i<10;i++){
+      const hx=(W/10)*i + Math.sin(t*.05+i)*20;
+      const hy=(t*2+i*80)%(H+60)-30;
+      heart(hx+40,hy,7+(i%3)*3);
+    }
+  }
+  else if (state==='gameover') {
+    centerPanel([
+      {t:'GAME OVER', y:220, s:30, c:'#ff6a6a'},
+      {t:'Merto kahvesiz kaldı...', y:280, s:12},
+      {t:'ENTER: tekrar dene', y:340, s:12, c:C.gold}
+    ]);
+  }
+}
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+document.fonts ? document.fonts.ready.then(loop) : loop();
+</script>
+</body>
+</html>
